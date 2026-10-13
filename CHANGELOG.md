@@ -1,3 +1,9 @@
+## [1.48.0](https://github.com/mahfujarr/morphe-patches/compare/v1.47.0...v1.48.0) (2026-10-13)
+
+### ✨ New Features
+
+* Add setting to hide main lyrics line after romanization ([8b697ce](https://github.com/mahfujarr/morphe-patches/commit/8b697cede604f0ee4e6ec2c499b8e14a1a3a738c))
+
 ## [1.47.0](https://github.com/MorpheApp/morphe-patches/compare/v1.46.0...v1.47.0) (2026-10-11)
 
 ### 🐛 Bug Fixes
