@@ -146,6 +146,7 @@ val lyricsPatch = bytecodePatch(
                     SwitchPreference("morphe_music_lyrics_show_refresh_button", summary = true),
                     SwitchPreference("morphe_music_lyrics_hide_info", summary = true),
                     SwitchPreference("morphe_music_lyrics_swap_trans_roma", summary = true),
+                    SwitchPreference("morphe_music_lyrics_hide_main_after_romanize", summary = true),
                     SwitchPreference("morphe_music_lyrics_keep_screen_on", summary = true)
                 )
             ),
