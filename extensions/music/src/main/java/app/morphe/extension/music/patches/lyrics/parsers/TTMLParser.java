@@ -1382,7 +1382,6 @@ public final class TTMLParser {
             }
         }
 
-        // Add main translations (with word-level timing if available)
         for (Map.Entry<String, SidecarTranslation> entry : mainByLang.entrySet()) {
             final String lang = entry.getKey();
             final SidecarTranslation st = entry.getValue();
@@ -1396,7 +1395,6 @@ public final class TTMLParser {
             }
         }
 
-        // Add BG translations (from sidecar) — prefixed with "bg:" to distinguish
         for (Map.Entry<String, SidecarTranslation> entry : bgByLang.entrySet()) {
             final String lang = "bg:" + entry.getKey();
             final SidecarTranslation st = entry.getValue();

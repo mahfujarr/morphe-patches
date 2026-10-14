@@ -29,10 +29,9 @@ import app.morphe.extension.shared.Utils;
  * Fetches the lyrics of the track queued behind the current one, so the switch to it
  * finds them in the cache instead of waiting for the network.
  *
- * <p>The work runs on a thread of its own, which is the whole point of it: a prefetch
- * must not be able to delay, cancel or take part in the lookup of the track that is
- * actually playing. It therefore never touches the lookup request id, the in-flight
- * fetches or the state, and it only ever adds to the lyrics cache.
+ * <p>Runs on a thread of its own so it cannot delay or cancel the lookup of the track
+ * actually playing: it never touches the request id, the in-flight fetches or the
+ * state, and only ever adds to the cache.
  *
  * <p>Only what the lookup itself would store is written, so a prefetch never decides
  * which provider the user gets: the cache is keyed by provider, and a track no
@@ -53,9 +52,8 @@ final class LyricsPrefetcher {
             });
 
     /**
-     * The video whose successor is being fetched, which is also the generation of the
-     * running task: a newer track replaces it, and the older task stops at its next
-     * checkpoint instead of fetching lyrics nobody asked for any more.
+     * Also the running task's generation: an older task stops at its next checkpoint
+     * rather than fetching lyrics nobody asked for.
      */
     private static volatile String prefetchingFor;
 
@@ -65,9 +63,8 @@ final class LyricsPrefetcher {
     }
 
     /**
-     * Starts a prefetch for whatever plays after the given video. Cheap to call on
-     * every track: a target that is already being prefetched is left alone, and
-     * everything that cannot answer is skipped without a request.
+     * Starts a prefetch for whatever plays after the given video. Cheap to call on every
+     * track: an already-prefetched target is left alone and a hopeless one skipped.
      */
     static void prefetchSuccessorOf(@Nullable String currentVideoId) {
         if (currentVideoId == null || currentVideoId.isEmpty()) return;
@@ -115,16 +112,13 @@ final class LyricsPrefetcher {
         if (superseded(currentVideoId)) return;
         if (track == null) return;
 
-        // A successor the queue names by the video that is already playing is a repeat,
-        // which has nothing to prepare for. A successor it can only name by title and
-        // artist has no video id, which is no reason to skip it: the providers keyed by
-        // one are not asked here anyway.
+        // A successor named by the playing video is a repeat. One named only by title and
+        // artist has no video id, which is fine: video-keyed providers are not asked.
         if (nextVideoId[0] != null && nextVideoId[0].equals(currentVideoId)) {
             return;
         }
 
-        // The providers keyed by the video of the playing track only know that track,
-        // so the successor is asked with the ones that search by title and artist.
+        // Video-keyed providers only know the playing track, so ask the title ones.
         final List<LyricsProvider> providers = LyricsManager.searchableProviders(
                 LyricsManager.providersInOrder(Settings.LYRICS_SOURCE.get()));
         if (providers.isEmpty()) return;
@@ -133,17 +127,13 @@ final class LyricsPrefetcher {
         fetchIntoCache(currentVideoId, track, providers);
     }
 
-    /**
-     * Asks the providers in the order the user put them in and stops at the first
-     * usable answer, which is the same rule the lookup follows within a stage.
-     */
+    /** Provider order, stopping at the first usable answer. */
     private static void fetchIntoCache(String currentVideoId, TrackInfo track,
                                        List<LyricsProvider> providers) {
         for (LyricsProvider provider : providers) {
             if (superseded(currentVideoId)) return;
 
-            // Custom terms were typed for one track and must never be stored as the
-            // answer for the default terms of another.
+            // Custom terms belong to one track, never to another's default terms.
             if (LyricsRequests.isCustomMatchMode()) return;
 
             try {

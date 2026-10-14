@@ -345,7 +345,6 @@ static List<WordTiming> computeWordTimings(List<LyricsLine> lines, int index) {
         final Paint.FontMetricsInt baseFm = new Paint.FontMetricsInt();
         basePaint.getFontMetricsInt(baseFm);
         String original = line.text();
-        String originalTrimmed = original.trim();
 
         final boolean usePerWord = perWordRomaji && line.hasWords() && lineHasWordRomaji(line);
 
@@ -358,26 +357,14 @@ static List<WordTiming> computeWordTimings(List<LyricsLine> lines, int index) {
                 (int) (smallHeight * MAIN_LINE_SPACING + 0.5f) - baseFm.descent - smallAscent;
         final Spacing spacing = new Spacing(mainClear, smallClear, boundaryClear);
 
-        String romanization = null;
-        if (!usePerWord && romanizedLines != null && index < romanizedLines.size()) {
-            String roma = romanizedLines.get(index).text().trim();
-            if (!roma.isEmpty() && !roma.equalsIgnoreCase(originalTrimmed)) {
-                romanization = roma;
-            }
-        }
+        String romanization = usePerWord
+                ? null : lineRomanizationAt(line, index, romanizedLines);
+        String translation = translationAt(line, index, translatedLines);
 
-        List<String> translated = translatedLines;
-        String translation = null;
-        if (translated != null && index < translated.size()) {
-            String raw = translated.get(index);
-            String t = raw == null ? "" : raw.trim();
-            if (!t.isEmpty() && !t.equalsIgnoreCase(originalTrimmed)) {
-                translation = t;
-            }
-        }
-
+        // An only mode never drops a line: what the provider left untranslated keeps the
+        // original rather than leaving a hole in the song.
         if (onlyMode == LyricsPanelView.OnlyMode.TRANS) {
-            final String content = translation != null ? translation : "";
+            final String content = translation != null ? translation : original;
             SpannableString text = new SpannableString(content);
             final int transStart = content.isEmpty() ? -1 : 0;
             final int transEnd = content.isEmpty() ? -1 : content.length();
@@ -386,24 +373,39 @@ static List<WordTiming> computeWordTimings(List<LyricsLine> lines, int index) {
         }
 
         if (onlyMode == LyricsPanelView.OnlyMode.ROMA) {
-            String content = null;
-            if (romanizedLines != null && index < romanizedLines.size()) {
-                String roma = romanizedLines.get(index).text().trim();
-                if (!roma.isEmpty() && !roma.equalsIgnoreCase(originalTrimmed)) {
-                    content = roma;
-                }
-            }
-            if (content == null && line.hasWords()) {
-                content = joinWordRomaji(line);
-            }
+            String content = romanizationForOnlyMode(line, index, romanizedLines);
             if (content == null) {
-                content = "";
+                content = original;
             }
             SpannableString text = new SpannableString(content);
             final int romaStart = content.isEmpty() ? -1 : 0;
             final int romaEnd = content.isEmpty() ? -1 : content.length();
             attachUniformSpacing(text, spacing);
             return new BuildResult(text, null, -1, -1, romaStart, romaEnd);
+        }
+
+        // Both at once: the original goes and whichever side carries more of the line takes
+        // the main slot. Decided per line, so a line left untranslated keeps its translation
+        // rather than going thin.
+        if (onlyMode == LyricsPanelView.OnlyMode.BOTH) {
+            final DualLine mainAndSmall =
+                    dualLineFor(line, index, translation, original, romanizedLines);
+            SpannableString dual = new SpannableString(mainAndSmall.text());
+            attachUniformSpacing(dual, spacing);
+            final boolean mainIsRoma = mainAndSmall.mainIsRoma();
+            final int smallStart = mainAndSmall.smallStart();
+            final int smallEnd = mainAndSmall.smallEnd();
+            if (smallStart >= 0) {
+                // Without this the small run keeps the main size and colour, so the two lines
+                // are told apart only by where they sit.
+                applySpans(dual, Collections.emptyList(), 0, smallStart - 1,
+                        mainIsRoma ? -1 : smallStart, mainIsRoma ? -1 : smallEnd,
+                        mainIsRoma ? smallStart : -1, mainIsRoma ? smallEnd : -1, false);
+            }
+            return new BuildResult(dual, null,
+                    mainIsRoma ? -1 : smallStart,
+                    mainIsRoma ? -1 : smallEnd,
+                    mainIsRoma ? smallStart : -1, mainIsRoma ? smallEnd : -1);
         }
 
         final boolean swap = Settings.LYRICS_SWAP_TRANS_ROMA.get();
@@ -463,6 +465,82 @@ static List<WordTiming> computeWordTimings(List<LyricsLine> lines, int index) {
         }
         text.setSpan(new UniformLineSpacingSpan(spacing), 0, text.length(),
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    /** The line's own translation, null when it has none or it only repeats the original. */
+    /**
+     * One line of the dual mode: the text to show and where the small run sits in it. The copy
+     * button reads the same call, so the two cannot disagree about which side is the main line.
+     *
+     * @param smallStart Where the small run starts, -1 when the line carries only one side.
+     */
+    record DualLine(String text, boolean mainIsRoma, int smallStart, int smallEnd) {
+    }
+
+    /** Both only-flags standing, so the original goes and the two swap-aware sides take over. */
+    @NonNull
+    static DualLine dualLineFor(LyricsLine line, int index, @Nullable String translation,
+            String original, @Nullable List<LyricsLine> romanizedLines) {
+        final String romanization = romanizationForOnlyMode(line, index, romanizedLines);
+        final boolean mainIsRoma;
+        final String main;
+        if (translation != null && romanization != null) {
+            mainIsRoma = !Settings.LYRICS_SWAP_TRANS_ROMA.get();
+            main = mainIsRoma ? romanization : translation;
+        } else if (translation != null) {
+            mainIsRoma = false;
+            main = translation;
+        } else if (romanization != null) {
+            mainIsRoma = true;
+            main = romanization;
+        } else {
+            mainIsRoma = true;
+            main = original;
+        }
+        final String small = translation != null && romanization != null
+                ? (mainIsRoma ? translation : romanization) : null;
+        if (small == null) {
+            return new DualLine(main, mainIsRoma, -1, -1);
+        }
+        return new DualLine(main + "\n" + small, mainIsRoma, main.length() + 1,
+                main.length() + 1 + small.length());
+    }
+
+    @Nullable
+    static String translationAt(LyricsLine line, int index,
+            @Nullable List<String> translatedLines) {
+        if (translatedLines == null || index >= translatedLines.size()) {
+            return null;
+        }
+        String raw = translatedLines.get(index);
+        if (raw == null) {
+            return null;
+        }
+        final String trimmed = raw.trim();
+        return !trimmed.isEmpty() && !trimmed.equalsIgnoreCase(line.text().trim())
+                ? trimmed : null;
+    }
+
+    /** The line's own romanization, without falling back to the per-word one. */
+    @Nullable
+    static String lineRomanizationAt(LyricsLine line, int index,
+            @Nullable List<LyricsLine> romanizedLines) {
+        if (romanizedLines == null || index >= romanizedLines.size()) {
+            return null;
+        }
+        String roma = romanizedLines.get(index).text().trim();
+        return !roma.isEmpty() && !roma.equalsIgnoreCase(line.text().trim()) ? roma : null;
+    }
+
+    /** What a romanization-only line shows: its own, else the per-word one joined up. */
+    @Nullable
+    static String romanizationForOnlyMode(LyricsLine line, int index,
+            @Nullable List<LyricsLine> romanizedLines) {
+        final String roma = lineRomanizationAt(line, index, romanizedLines);
+        if (roma != null) {
+            return roma;
+        }
+        return line.hasWords() ? joinWordRomaji(line) : null;
     }
 
     @Nullable

@@ -68,6 +68,7 @@ import app.morphe.extension.music.patches.lyrics.requests.SpotifyProvider;
 import app.morphe.extension.music.patches.lyrics.requests.UnisonProvider;
 import app.morphe.extension.music.patches.lyrics.requests.YouTubeMusicProvider;
 import app.morphe.extension.music.patches.lyrics.storage.LyricsCache;
+import app.morphe.extension.music.patches.lyrics.storage.TrackOffsetStore;
 import app.morphe.extension.music.patches.lyrics.ui.LyricsPanelInstaller;
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.music.shared.VideoInformation;
@@ -131,7 +132,7 @@ public final class LyricsManager {
                                       java.util.concurrent.Callable<T> fetch) {
         Future<T> future = service.submit(() -> id == requestId.get() ? fetch.call() : null);
         activeFetches.add(future);
-        // A track can change between submission and registration.
+        // The track can change between submission and registration.
         if (id != requestId.get()) {
             future.cancel(true);
             activeFetches.remove(future);
@@ -413,17 +414,27 @@ public final class LyricsManager {
 
     public void setTemporaryOffsetMs(int ms) { temporaryOffsetMs = ms; }
 
-    public void resetTemporaryOffsetMs() { temporaryOffsetMs = 0; }
+    /** Called from the panel when the track is about to change or to go away, not per drag frame. */
+    public void persistTemporaryOffsetMs() {
+        final TrackInfo track = currentTrack;
+        if (track == null) {
+            return;
+        }
+        final int ms = temporaryOffsetMs;
+        runOnLookupThread(() -> TrackOffsetStore.put(track, ms));
+    }
 
-    /**
-     * Injection point relay. Called on the main thread.
-     */
+    /** Only reached on a real track change, so a loop cannot discard the offset it comes round for again. */
+    private void loadTemporaryOffsetMs(TrackInfo track) {
+        temporaryOffsetMs = TrackOffsetStore.get(track);
+    }
+
+    /** Injection point; main thread. */
     public void onSetMetadata(@Nullable MediaMetadata metadata) {
         Utils.verifyOnMainThread();
         if (metadata == null) {
             return;
         }
-        resetTemporaryOffsetMs();
         currentMetadata = metadata;
         loadTrackOf(metadata);
         ensureLoadedForCurrentVideo();
@@ -459,8 +470,8 @@ public final class LyricsManager {
         String rawTitle = metadata.getString(MediaMetadata.METADATA_KEY_TITLE);
         String rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
         if (rawTitle == null || rawTitle.trim().isEmpty() || rawArtist == null || rawArtist.trim().isEmpty()) {
-            // A later metadata event is what names this video, so there is no track to
-            // look up yet and the lyric on screen belongs to whatever played before.
+            // A later event names this video, so there is nothing to look up yet and the
+            // lyric on screen belongs to whatever played before.
             dropStaleLyrics();
             return;
         }
@@ -581,8 +592,8 @@ public final class LyricsManager {
         if (videoId.isEmpty()) {
             return;
         }
-        // The lyric on screen belongs to this very video and nothing is waiting to name
-        // a different one, so there is nothing stale to drop.
+        // The lyric on screen belongs to this very video and nothing awaits another, so
+        // nothing is stale.
         if (videoId.equals(lyricsVideoId) && unconfirmedVideoId == null) {
             return;
         }
@@ -610,8 +621,9 @@ public final class LyricsManager {
         currentMediaUri = mediaUri;
         currentTrack = track;
         currentVideoId = videoId;
-        // A rebinding keeps the lyric of the track that played before, which is what
-        // makes it worth telling apart from the video the track was committed for.
+        loadTemporaryOffsetMs(track);
+        // A rebinding keeps the previous track's lyric, which is what makes it worth
+        // telling apart from the video the track was committed for.
         if (!sameTrack) {
             lyricsVideoId = videoId;
         }
@@ -654,9 +666,7 @@ public final class LyricsManager {
                 pending.mediaUri(), pending.videoId(), false);
     }
 
-    /**
-     * Injection point relay. Called on the main thread.
-     */
+    /** Injection point; main thread. */
     public void onSetPlaybackState(@Nullable PlaybackState playbackState) {
         Utils.verifyOnMainThread();
         if (playbackState == null) {
@@ -669,8 +679,8 @@ public final class LyricsManager {
         lastPlaybackSampleUptimeMs = positionUpdatedAtUptimeMs;
 
         final float speed = playbackState.getPlaybackSpeed();
-        // A paused state reports a speed of zero, which would freeze extrapolation
-        // even after playback resumes, so only positive speeds are kept.
+        // A paused state reports speed zero, which would freeze the extrapolation even
+        // after playback resumes, so only positive speeds are kept.
         if (speed > 0) {
             playbackSpeed = speed;
         }
@@ -679,8 +689,8 @@ public final class LyricsManager {
 
     public void onDisplayedTrackChanged(@Nullable String title, @Nullable String artist, @Nullable Uri mediaUri) {
         Utils.verifyOnMainThread();
-        // The mini player reports the displayed track before it checks whether the
-        // feature is on, so this must not be what decides to look lyrics up.
+        // The mini player reports the track before it checks whether the feature is on,
+        // so it must not be what decides to look lyrics up.
         if (!Settings.LYRICS_ENABLED.get()) {
             return;
         }
@@ -761,8 +771,8 @@ public final class LyricsManager {
         loadedForVideoId = preferenceVideoId;
         displaySegs = null;
 
-        // Started after this track's own lookup is on its way, so the two never wait
-        // on each other.
+        // Started after this track's own lookup is on its way, so they never wait on
+        // each other.
         LyricsPrefetcher.prefetchSuccessorOf(preferenceVideoId);
 
         runOnLookupThread(() -> runProviderLookup(id, track));
@@ -805,8 +815,8 @@ public final class LyricsManager {
             if (!phase2Done) {
                 String order = Settings.LYRICS_SOURCE.get();
                 List<LyricsProvider> providers = providersInOrder(order);
-                // The queue keeps coming from the terms the user searched, so the candidates
-                // have to be fetched with the same terms and by the same providers.
+                // The queue still comes from the searched terms, so candidates are fetched
+                // with those terms and those providers.
                 TrackInfo queryTrack = customQueryTrack(searchTrack);
                 if (queryTrack != null) {
                     providers = searchableProviders(providers);
@@ -1033,9 +1043,8 @@ public final class LyricsManager {
                 return;
             }
             if (display == null || display == Lyrics.NOT_FOUND || display.isEmpty()) {
-                // Nothing of it survives the current filters. The lookup ahead was already
-                // told to hold back, so the suppression is released before it can return
-                // without showing anything.
+                // Nothing survives the current filters. The lookup ahead was told to hold
+                // back, so the suppression is released before it returns empty-handed.
                 rememberPreferenceDisarmed();
                 setState(State.NOT_FOUND, null);
                 return;
@@ -1072,11 +1081,92 @@ public final class LyricsManager {
         return new TrackInfo(title, artist, track.album(), track.durationSeconds());
     }
 
-    /**
+/**
+ * Shows lyrics that were computed outside any provider - by transcription or by aligning timings
+ * onto text the user already had - as the version for this track, and moves everything that was
+ * showing or waiting behind it.
+ *
+ * <p>This is what the other paths converge on, so the panel sees an ordinary load: the same
+ * normalisation {@link #prepareForDisplay} applies, and the same remembered preference that pins
+ * a chosen version across launches. Because the new version joins {@link #shownFingerprints},
+ * refresh skips it like any other shown version and lands on what was pushed back.
+ */
+public void publishPreferred(@Nullable Lyrics injected) {
+    Utils.verifyOnMainThread();
+    if (injected == null || injected == Lyrics.NOT_FOUND || injected.isEmpty()) {
+        return;
+    }
+
+    final Lyrics display;
+    try {
+        display = prepareForDisplay(injected);
+    } catch (Throwable ignored) {
+        return;
+    }
+    if (display == null || display == Lyrics.NOT_FOUND || display.isEmpty()) {
+        return;
+    }
+
+    // Everything lookup-related is about a version this one replaces.
+    final int id = requestId.incrementAndGet();
+    cancelPendingFetches();
+
+    final List<Lyrics> pushedBack = new ArrayList<>();
+    final Lyrics previous = currentLyrics;
+    if (previous != null && !previous.isEmpty() && previous != Lyrics.NOT_FOUND) {
+        pushedBack.add(previous);
+    }
+    synchronized (candidateQueue) {
+        for (ScoredCandidate candidate : new ArrayList<>(candidateQueue)) {
+            pushedBack.add(candidate.lyrics());
+        }
+        candidateQueue.clear();
+    }
+
+    final String chosen = fingerprint(display);
+    shownFingerprints.clear();
+    shownFingerprints.add(chosen);
+    rememberedQueue = null;
+    preferredFingerprint = chosen;
+    // Holds back anything still arriving for this request from taking the screen instead.
+    suppressForRequest = id;
+
+    setState(State.LOADED, display);
+
+    for (Lyrics candidate : pushedBack) {
+        if (candidate == null || candidate.isEmpty() || candidate == Lyrics.NOT_FOUND) {
+            continue;
+        }
+        final String fp = fingerprint(candidate);
+        if (fp.equals(chosen)) {
+            continue;
+        }
+        synchronized (candidateQueue) {
+            boolean alreadyQueued = false;
+            for (ScoredCandidate queued : candidateQueue) {
+                if (fp.equals(fingerprint(queued.lyrics()))) {
+                    alreadyQueued = true;
+                    break;
+                }
+            }
+            if (!alreadyQueued) {
+                candidateQueue.add(new ScoredCandidate(
+                        LyricsRequests.composite(LyricsRequests.NEUTRAL, candidate, 0),
+                        LyricsRequests.syncRank(candidate), candidate));
+            }
+        }
+    }
+
+    LyricsPanelInstaller.enableLyricsButton();
+    Utils.runOnMainThreadDelayed(LyricsPanelInstaller::onLyricsPanelDetected, 300);
+    rememberPreference(display);
+}
+
+/**
      * Puts the queue back in the order the user left it: candidates they had not reached yet
      * keep their remembered place, and anything new arrives after them in score order.
      */
-    private void reorderQueueByRemembered() {
+private void reorderQueueByRemembered() {
         List<String> remembered = rememberedQueue;
         if (remembered == null || remembered.isEmpty()) {
             return;
@@ -1244,8 +1334,8 @@ public final class LyricsManager {
             searchQueryArtist = queryArtist;
         }
 
-        // The video id providers only know the track that is playing, so they can only be
-        // asked when the search terms are the metadata of that track.
+        // Video id providers only know the playing track, so they are asked only when the
+        // terms are that track's own metadata.
         final List<LyricsProvider> enabledProviders =
                 providersInOrder(Settings.LYRICS_SOURCE.get());
         final List<LyricsProvider> providers = defaultTerms
@@ -1298,7 +1388,7 @@ public final class LyricsManager {
             }
             if (validResult) {
                 if (!LyricsRequests.isCustomMatchMode()) {
-                    LyricsCache.put(track, result.providerName(), result);
+                    LyricsCache.put(track, cacheSourceFor(result), result);
                 }
                 publishFromLookup(id, result);
             } else {
@@ -1328,7 +1418,8 @@ public final class LyricsManager {
             if (embeddedUri != null) {
                 Lyrics embedded = LocalLyricsFetcher.fetch(embeddedUri);
                 if (embedded != null) {
-                    LyricsCache.put(track, "LOCAL", embedded);
+                    // Nothing reads the cache under this name: embedded lyrics come from the
+                    // file every time, so writing them only fills a slot that is never answered.
                     publishFromLookup(id, embedded);
                     if (!suppressed) {
                         return;
@@ -1379,8 +1470,8 @@ public final class LyricsManager {
         boolean[] failed = {false};
         Lyrics result;
 
-        // Custom terms carry no InnerTube metadata of the playing track, which says nothing
-        // about them.
+        // Custom terms carry none of the playing track's InnerTube metadata, which says
+        // nothing about them.
         Tiers tiers = queryTrack != null
                 ? buildTiers(queryTrack, queryTrack.title())
                 : buildTiers(track, currentRawTitle);
@@ -1408,8 +1499,8 @@ public final class LyricsManager {
             return;
         }
 
-        // A miss on the track's own terms marks the provider as having nothing for the track;
-        // a miss on typed terms says nothing about them and leaves the cache untouched.
+        // A miss on the track's own terms marks the provider as having nothing; a miss on
+        // typed terms says nothing about them and leaves the cache untouched.
         if (queryTrack == null) {
             for (LyricsProvider provider : providers) {
                 if (fetchResult.providersWithResults.contains(provider.name())) {
@@ -2084,14 +2175,15 @@ public final class LyricsManager {
      * already is their clock: the SponsorBlock segments must not be subtracted from it,
      * neither when a position is read nor when a seek is mapped back. The name set covers
      * every provider that resolves a video id; results matched by title always come from
-     * the released audio and always get the subtraction.
+     * the released audio and always get the subtraction. Captions is matched by prefix
+     * because its ASR track is carried under a name of its own.
      */
     private static boolean isVideoIdMatchedLyrics(@Nullable Lyrics lyrics) {
         if (lyrics == null) {
             return false;
         }
         String provider = lyrics.providerName();
-        return Lyrics.CAPTIONS_PROVIDER.equals(provider)
+        return (provider != null && provider.startsWith(Lyrics.CAPTIONS_PROVIDER))
                 || "Unison".equals(provider)
                 || "SimpMusic".equals(provider)
                 || (provider != null && provider.startsWith("YouTube Music"));
@@ -2231,8 +2323,8 @@ public final class LyricsManager {
         }
 
         if (newState == State.LOADED) {
-            // A panel is only detected while the app builds its own lyrics into it, which it
-            // never does for a music video, so an open panel is covered from here instead.
+            // The app never builds its own lyrics into the panel for a music video, so an
+            // open one is covered from here instead.
             LyricsPanelInstaller.onLyricsPanelDetected();
             LyricsPanelInstaller.enableLyricsButton();
             detectSections(lyrics);

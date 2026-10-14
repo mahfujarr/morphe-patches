@@ -11,7 +11,6 @@ import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -38,19 +37,20 @@ public final class LyricsTranslator {
     private LyricsTranslator() {
     }
 
-    private static String translationLanguage() {
-        return LyricsRequests.translationLanguage();
-    }
-
     @Nullable
     private static List<String> embeddedTranslation(Lyrics lyrics, String target, int lineCount) {
         Map<String, List<LyricsLine>> byLang = lyrics.translations();
         if (byLang == null || byLang.isEmpty()) {
             return null;
         }
-        String targetLang = primarySubtag(target);
+        String targetLang = LyricsRequests.primarySubtag(target);
+        final String targetScript = LyricsRequests.resolvedScript(target);
         for (Map.Entry<String, List<LyricsLine>> entry : byLang.entrySet()) {
-            if (!primarySubtag(entry.getKey()).equals(targetLang)) {
+            String key = entry.getKey();
+            if (!LyricsRequests.primarySubtag(key).equals(targetLang)) {
+                continue;
+            }
+            if (!LyricsRequests.resolvedScript(key).equals(targetScript)) {
                 continue;
             }
             List<LyricsLine> lines = entry.getValue();
@@ -85,10 +85,6 @@ public final class LyricsTranslator {
         return out;
     }
 
-    private static String primarySubtag(String lang) {
-        return LyricsRequests.primarySubtag(lang);
-    }
-
     public static void translate(TrackInfo track, Lyrics lyrics, String source, Callback callback) {
         Utils.verifyOnMainThread();
 
@@ -97,7 +93,7 @@ public final class LyricsTranslator {
             lines.add(line.text());
         }
 
-        String language = translationLanguage();
+        String language = LyricsRequests.translationLanguage();
 
         List<String> embedded = embeddedTranslation(lyrics, language, lines.size());
         if (embedded != null) {

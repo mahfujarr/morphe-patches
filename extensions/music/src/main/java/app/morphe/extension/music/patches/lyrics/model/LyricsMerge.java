@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import app.morphe.extension.music.patches.lyrics.model.Lyrics;
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 import app.morphe.extension.shared.translation.TextTranslator;
@@ -31,9 +32,6 @@ public final class LyricsMerge {
     private LyricsMerge() {
     }
 
-    /**
-     * @return {@code true} when at least one line carries non-empty auxiliary text.
-     */
     public static boolean hasText(@Nullable List<LyricsLine> lines) {
         if (lines == null) {
             return false;
@@ -108,6 +106,30 @@ public final class LyricsMerge {
             result.add(line.isEmpty() ? "" : mapped.get(next++));
         }
         return result;
+    }
+
+    /**
+     * The lyric with one more credit line on it, or unchanged when it already carries that exact
+     * line or either half is missing.
+     */
+    @Nullable
+    public static Lyrics addSongwriter(@Nullable Lyrics lyrics, @Nullable String entry) {
+        if (lyrics == null || entry == null) {
+            return lyrics;
+        }
+        List<String> songwriters = new ArrayList<>();
+        List<String> existing = lyrics.songwriters();
+        if (existing != null) {
+            songwriters.addAll(existing);
+        }
+        if (songwriters.contains(entry)) {
+            return lyrics;
+        }
+        songwriters.add(entry);
+        return new Lyrics(lyrics.lines(), lyrics.providerName(), lyrics.synced(),
+                lyrics.romanization(), lyrics.translations(), lyrics.romanizations(),
+                songwriters, lyrics.rawFormat(), lyrics.formatType(), lyrics.sourceUrl(),
+                lyrics.about());
     }
 
     public static List<LyricsLine> mergeRomanization(List<LyricsLine> original,

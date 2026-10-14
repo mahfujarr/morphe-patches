@@ -28,22 +28,16 @@ import app.morphe.extension.shared.Logger;
  * lock screen, Android Auto and Bluetooth displays. The artist field is rewritten to
  * {@code "artist - title"} so the track identity is preserved.
  *
- * <p>The app's {@link MediaSession#setMetadata(MediaSession)} call site is observed to
- * capture the {@link MediaSession} instance and the original metadata. Modified metadata is
- * then pushed from a ticker via the captured session. Because that push goes through the
- * framework directly, it does not re-enter the hooked app call site, so the lyrics and
- * scrobbling observers (which read the original metadata at that site) are never affected.
+ * <p>The session and original metadata are captured at the app's {@code setMetadata} call
+ * site, then modified metadata is pushed from a ticker. Pushing through the framework skips
+ * that call site, so the lyrics and scrobbling observers reading it are unaffected.
  *
- * <p>All fields other than title and artist, notably the album art, are preserved by copying
- * the original metadata with {@link MediaMetadata.Builder}. The display variants of the title
- * and of the artist are rewritten as well, because the lock screen prefers them over the plain
- * ones when both are present.
+ * <p>The display variants of title and artist are rewritten too, since the lock screen prefers
+ * them when both are present.
  *
- * <p>The MediaSession push only supports Android 11 and above: Android 10 lock screens render
- * the media notification (whose text is baked into the RemoteViews at post time) instead of
- * reading session metadata, so a line pushed here would never be shown there. Android 10 and
- * older are not adapted.
- */
+ * <p>Android 11 and up only: Android 10 renders the media notification instead, whose text is
+ * baked into the RemoteViews at post time.
+ * */
 @SuppressWarnings("unused")
 public final class LockScreenLyrics {
 
@@ -63,20 +57,18 @@ public final class LockScreenLyrics {
     @Nullable
     private static String cachedCleanedArtist;
 
-    /** Title pushed on the last tick, to avoid redundant {@code setMetadata} calls. */
+    /** Last pushed title, to skip redundant {@code setMetadata} calls. */
     @Nullable
     private static volatile String lastPushedTitle;
 
-    /** Set when the app pushes fresh metadata, so the next tick pushes it again. */
+    /** The app pushed fresh metadata, so the next tick pushes it again. */
     private static volatile boolean needsRepush;
 
-    /** Drives the periodic check that mirrors the current line into the MediaSession. */
+    /** Periodic check that mirrors the current line. */
     private static final LyricsTicker ticker = new LyricsTicker(LockScreenLyrics::tick);
 
-    /**
-     * Re-arms the ticker whenever lyrics arrive or disappear, so a late lookup does not
-     * leave the mirror stuck on the track title.
-     */
+    /** Re-arms the ticker on lyrics arriving or disappearing, so a late lookup cannot
+     * leave the mirror stuck on the track title. */
     private static final LyricsManager.Listener lyricsListener = (state, lyrics) -> {
         if (state == LyricsManager.State.LOADED || state == LyricsManager.State.NOT_FOUND) {
             ticker.schedule();
@@ -94,10 +86,8 @@ public final class LockScreenLyrics {
     private LockScreenLyrics() {
     }
 
-    /**
-     * Observed at the app's {@code MediaSession.setMetadata} call site. Captures the session
-     * and original metadata and (re)starts the ticker when the feature is enabled.
-     */
+    /** At the app's {@code setMetadata} site: captures session and metadata, restarts the
+     * ticker when enabled. */
     public static void onMediaSessionSetMetadata(MediaSession session, MediaMetadata original) {
         try {
             if (session == null || original == null) {

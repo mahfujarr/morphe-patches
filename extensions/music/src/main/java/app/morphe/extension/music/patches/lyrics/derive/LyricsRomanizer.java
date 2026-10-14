@@ -50,7 +50,14 @@ public final class LyricsRomanizer {
 
         executor.execute(() -> {
             try {
+                // A romanization is read by line index, so one without an entry for every
+                // line describes a different lyric and would put a reading under the wrong
+                // line. It is dropped so the line is romanized again.
+                final int lineCount = lyrics.lines().size();
                 List<LyricsLine> embedded = lyrics.romanization();
+                if (embedded != null && embedded.size() != lineCount) {
+                    embedded = null;
+                }
                 if (embedded == null || embedded.isEmpty()) {
                     Map<String, List<LyricsLine>> romanizations = lyrics.romanizations();
                     if (romanizations != null && !romanizations.isEmpty()) {
@@ -79,7 +86,7 @@ public final class LyricsRomanizer {
                         return;
                     }
 
-                    List<String> aiResult = aiRomanize(lines, LyricsRequests.deviceLanguage(), track.title(),
+                    List<String> aiResult = aiRomanize(lines, LyricsRequests.romanizationLanguage(), track.title(),
                             track.artist(), baseUrl, apiToken, model);
                     if (aiResult != null) {
                         List<LyricsLine> aiLines = toLines(aiResult);
@@ -118,9 +125,11 @@ public final class LyricsRomanizer {
 
     private static List<LyricsLine> collectMatchingRomanizations(
             Map<String, List<LyricsLine>> romanizations, List<LyricsLine> allLines) {
-        String langTag = Locale.getDefault().toLanguageTag();
-        String langCode = langTag.contains("-")
-                ? langTag.substring(0, langTag.indexOf("-")) : langTag;
+        // Keys are xml:lang from the file, with "romaji" standing in for a sidecar that named none.
+        String langTag = LyricsRequests.isDefaultRomanizationLanguage()
+                ? Locale.getDefault().toLanguageTag()
+                : LyricsRequests.romanizationLanguage();
+        String langCode = LyricsRequests.primarySubtag(langTag);
 
         List<String> matchedKeys = new ArrayList<>();
         for (String key : romanizations.keySet()) {
@@ -189,6 +198,9 @@ public final class LyricsRomanizer {
             }
         }
 
+        if (allLines == null || result.size() != allLines.size()) {
+            return null;
+        }
         return result;
     }
 
@@ -205,10 +217,11 @@ public final class LyricsRomanizer {
 
     @Nullable
     private static List<String> romanizeOnline(List<String> lines) {
+        final String language = Settings.LYRICS_ROMANIZE_LANGUAGE.get();
         return LyricsMerge.mapLinesOnline(lines,
                 l -> {
                     try {
-                        return TextTranslator.romanize(l);
+                        return TextTranslator.romanize(l, language);
                     } catch (Exception ex) {
                         throw new RuntimeException(ex);
                     }

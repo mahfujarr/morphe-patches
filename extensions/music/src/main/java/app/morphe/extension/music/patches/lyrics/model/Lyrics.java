@@ -109,7 +109,7 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
         final int size = lines.size();
         int result = -1;
 
-        // Fast path: still inside the hinted line, or moved into the next one.
+        // Fast path: still in the hinted line, or in the next one.
         if (hintIndex >= 0 && hintIndex < size) {
             if (positionMs >= lines.get(hintIndex).startTimeMs()) {
                 final int next = hintIndex + 1;
@@ -168,6 +168,11 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
                 final boolean anomalous = (w.startMs() == 0 && lineStart > 0)
                         || (w.endMs() == 0 && w.startMs() > 0)
                         || (w.startMs() > 0 && w.startMs() == w.endMs())
+                        // An end before the begin is the same defect the equality case above
+                        // catches, just off by however far the two drifted apart. The service
+                        // returns these often enough on aligned lyrics that leaving them would
+                        // pin a word to a negative-length range and freeze its highlight.
+                        || (w.startMs() > 0 && w.endMs() > 0 && w.endMs() < w.startMs())
                         || (w.startMs() > 0 && w.startMs() < lineStart - 500);
 
                 if (!anomalous) {
@@ -237,14 +242,13 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
             if (nextStart != LyricsLine.NO_TIME) {
                 effectiveEnd = Math.min(effectiveEnd, nextStart);
             }
-            // Also respect the line's own endTimeMs if set.
+            // The line's own end wins when it is set.
             if (line.endTimeMs() != LyricsLine.NO_TIME) {
                 effectiveEnd = Math.min(effectiveEnd, line.endTimeMs());
             }
-            // The floor keeps the last word on screen, but it must not reach into the next
-            // line: ranges crossing a line boundary chain the karaoke highlight over several
-            // lines at once, and the single slot the panel keeps for one retiring highlight
-            // then loses an unfinished line that nothing clears afterwards.
+            // The floor keeps the last word on screen but must not reach into the next line:
+            // a range crossing the boundary chains the highlight over several lines, and the
+            // panel's single retiring slot then loses an unfinished line nothing clears.
             long floor = lastWord.startMs() + 200;
             if (nextStart != LyricsLine.NO_TIME && nextStart > lastWord.startMs()) {
                 floor = Math.min(floor, nextStart);
