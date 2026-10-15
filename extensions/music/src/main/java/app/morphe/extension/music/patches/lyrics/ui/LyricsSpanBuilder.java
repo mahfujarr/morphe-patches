@@ -482,28 +482,21 @@ static List<WordTiming> computeWordTimings(List<LyricsLine> lines, int index) {
     static DualLine dualLineFor(LyricsLine line, int index, @Nullable String translation,
             String original, @Nullable List<LyricsLine> romanizedLines) {
         final String romanization = romanizationForOnlyMode(line, index, romanizedLines);
+        final String effectiveRoma = romanization != null ? romanization : original;
         final boolean mainIsRoma;
         final String main;
-        if (translation != null && romanization != null) {
+        final String small;
+        if (translation != null) {
             mainIsRoma = !Settings.LYRICS_SWAP_TRANS_ROMA.get();
-            main = mainIsRoma ? romanization : translation;
-        } else if (translation != null) {
-            mainIsRoma = false;
-            main = translation;
-        } else if (romanization != null) {
-            mainIsRoma = true;
-            main = romanization;
+            main = mainIsRoma ? effectiveRoma : translation;
+            small = mainIsRoma ? translation : effectiveRoma;
+            return new DualLine(main + "\n" + small, mainIsRoma, main.length() + 1,
+                    main.length() + 1 + small.length());
         } else {
             mainIsRoma = true;
-            main = original;
-        }
-        final String small = translation != null && romanization != null
-                ? (mainIsRoma ? translation : romanization) : null;
-        if (small == null) {
+            main = effectiveRoma;
             return new DualLine(main, mainIsRoma, -1, -1);
         }
-        return new DualLine(main + "\n" + small, mainIsRoma, main.length() + 1,
-                main.length() + 1 + small.length());
     }
 
     @Nullable

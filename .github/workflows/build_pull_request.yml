@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - dev
+      - feat/dual-mode-fix
   pull_request:
     branches:
       - dev
