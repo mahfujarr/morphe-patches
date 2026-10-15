@@ -804,6 +804,35 @@ public final class LyricsRequests {
         return Character.UnicodeScript.of(c) == Character.UnicodeScript.HAN;
     }
 
+    public static boolean isRomanScript(Lyrics lyrics) {
+        if (lyrics == null || lyrics.lines() == null || lyrics.lines().isEmpty()) {
+            return false;
+        }
+        return isRomanScript(lyrics.lines());
+    }
+
+    public static boolean isRomanScript(List<LyricsLine> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return false;
+        }
+        boolean hasAnyLetter = false;
+        for (LyricsLine line : lines) {
+            String text = line.text();
+            if (text == null) continue;
+            for (int i = 0; i < text.length(); ) {
+                int codePoint = text.codePointAt(i);
+                i += Character.charCount(codePoint);
+                if (Character.isLetter(codePoint)) {
+                    hasAnyLetter = true;
+                    if (Character.UnicodeScript.of(codePoint) != Character.UnicodeScript.LATIN) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return hasAnyLetter;
+    }
+
     static double jaccard(String a, String b) {
         final java.util.Set<String> ta = tokens(a);
         final java.util.Set<String> tb = tokens(b);

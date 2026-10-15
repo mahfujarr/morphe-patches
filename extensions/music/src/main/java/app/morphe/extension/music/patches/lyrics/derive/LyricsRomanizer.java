@@ -42,6 +42,11 @@ public final class LyricsRomanizer {
     public static void romanize(TrackInfo track, Lyrics lyrics, String source, Callback callback) {
         Utils.verifyOnMainThread();
 
+        if (LyricsRequests.isRomanScript(lyrics)) {
+            callback.onRomanized(null, false, false, null, false);
+            return;
+        }
+
         List<String> lines = new ArrayList<>(lyrics.lines().size());
         for (LyricsLine line : lyrics.lines()) {
             String text = line.text();

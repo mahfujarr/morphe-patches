@@ -852,9 +852,13 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
                             onTranslateClicked();
                         }
                         if (Settings.LYRICS_ROMANIZE_ONLY.get()) {
-                            requestRomanizeOnly(newLyrics);
+                            if (!LyricsRequests.isRomanScript(newLyrics)) {
+                                requestRomanizeOnly(newLyrics);
+                            }
                         } else if (Settings.LYRICS_ROMANIZE.get()) {
-                            onRomanizeClicked();
+                            if (!LyricsRequests.isRomanScript(newLyrics)) {
+                                onRomanizeClicked();
+                            }
                         }
                         if (refreshInProgress) {
                             refreshInProgress = false;
@@ -1804,7 +1808,8 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
             updateDualPill();
             showLyrics(current);
             updateTranslateLabel();
-            if (onlyMode == OnlyMode.BOTH && romanizedLines == null && !perWordRomaji) {
+            if (onlyMode == OnlyMode.BOTH && romanizedLines == null && !perWordRomaji
+                    && !LyricsRequests.isRomanScript(current)) {
                 requestRomanizeOnly(current);
             }
             return;
@@ -1840,7 +1845,8 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
                     showLyrics(current);
                     if (onlyMode == OnlyMode.BOTH) {
                         // The other side already flagged itself, so only this one was missing.
-                        if (romanizedLines == null && !perWordRomaji) {
+                        if (romanizedLines == null && !perWordRomaji
+                                && !LyricsRequests.isRomanScript(current)) {
                             requestRomanizeOnly(current);
                         }
                         return;
@@ -1899,8 +1905,9 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
             }
             return;
         }
+        final boolean isRoman = LyricsRequests.isRomanScript(lyrics);
         final boolean haveTranslate = translatedLines != null;
-        final boolean haveRomanize = romanizedLines != null || perWordRomaji;
+        final boolean haveRomanize = romanizedLines != null || perWordRomaji || isRoman;
         Settings.LYRICS_TRANSLATE_ONLY.save(false);
         Settings.LYRICS_ROMANIZE_ONLY.save(false);
         // Only the side that failed: cancelling the other one wipes the very lines that are the
@@ -2238,6 +2245,10 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
                 return;
             }
 
+            if (LyricsRequests.isRomanScript(current)) {
+                return;
+            }
+
             Settings.LYRICS_ROMANIZE.save(true);
             Settings.LYRICS_ROMANIZE_ONLY.save(false);
             romanizeInProgress = true;
@@ -2308,9 +2319,13 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
             if (otherOnly) {
                 enterDualMode();
                 showLyrics(current);
-                if (romanizedLines == null && !perWordRomaji) {
+                if (romanizedLines == null && !perWordRomaji && !LyricsRequests.isRomanScript(current)) {
                     requestRomanizeOnly(current);
                 }
+                return;
+            }
+
+            if (LyricsRequests.isRomanScript(current)) {
                 return;
             }
 
@@ -2358,7 +2373,7 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
             disableNormalTranslate();
             updateTranslateLabel();
         }
-        if (romanizedLines != null || perWordRomaji) {
+        if (romanizedLines != null || perWordRomaji || LyricsRequests.isRomanScript(current)) {
             onlyMode = Settings.LYRICS_TRANSLATE_ONLY.get() ? OnlyMode.BOTH : OnlyMode.ROMA;
             applyOnlyModeState();
             updateDualPill();
